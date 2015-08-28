@@ -1,0 +1,94 @@
+---
+title: "Logistic Regression with the Lasso"
+author: "Melody"
+date: "August 21, 2015"
+output: html_document
+---
+
+About a year ago, I naively entered a data hackathon hosted by a loan company. I had no experience with machine learning algorithms and I was only somewhat comfortable programming in R. We were given 6 hours to build the best model we can to decide whether or not to grant a loan to an individual based on information in a labelled training set. In short, it was a disaster; with only about 30 minutes left in the hackathon, I was still in the data cleanup stage! 
+
+Since then, I've completed [several ML/AI graduate courses](http://melodyyin.github.io/courses/) where I completed assignments using popular algorithms, and I've also been using R regularly both within courses and on my own time. So, I thought this dataset would be well-suited for learning new algorithms and reviewing old ones! In the following post, I will be implementing logistic regression.
+
+~
+
+```{r setup, include=FALSE}
+setwd("C:/Users/MelodyYin/Desktop")
+```
+
+The training data set was made up of 70 categorical and numerical variables. I looked through the list and determined that 4 of them can be dropped because they have to do with physical location and not personal attributes. The final decision is in the `loan_status` column, which I will convert to a binary value and call the new column `decision`.
+
+```{r preprocess, cache=TRUE, message=FALSE}
+library(dplyr)
+train = read.csv("training.csv", sep=";")
+train$decision = as.numeric(as.factor(train$loan_status)) - 1  # convert to binary
+train = select(train, -id, -addr_city, -addr_state, -emp_title, -loan_status) # drop irrel vars
+str(train)
+```
+
+It looks like `revol_util` and `int_rate` are percentages, so let's make these numeric and R won't mistake them for factors. `emp_length` can remain a factor. Also, there are a lot of missing values in the data. We can remove these rows or try to substitute reasonable numbers for them.
+
+```{r preprocess2, cache=TRUE}
+train$revol_util = as.numeric(strsplit(as.vector(train$revol_util), "%"))
+train$int_rate = as.numeric(strsplit(as.vector(train$int_rate), "%"))
+col_nas = apply(train, 2, function(x) sum(is.na(x)))
+summary(col_nas)
+```
+
+Ok, quite a lot of NAs in this dataset. If we were to get rid of all of the rows, then only `r nrow(train) - max(col_nas)` would remain. However, we can keep all of our observations if we remove the columns with missing values so that only `r sum(col_nas==0)` columns remain. We could also perform imputation using k-nearest neighbors for the variables that are only about 10% missing, but risk adding bias to the training set otherwise.  
+
+```{r preprocess3, cache=TRUE}
+train = select(train, one_of(names(which(col_nas==0))))
+```
+
+`r ncol(train)-1` explanatory variables is still quite a lot. I remember at the hackathon, I spent quite a bit of time thinking about how to combine several variables together. Now, I know that is called features engineering (*here is a reminder to myself to come back to this at the end of my algorithms exploration*). For this exercise, I first tried stepwise regression using forward selection. However, the full model, using all `r ncol(train)-1` variables, never converged. So, I looked to lasso regression, which penalizes the size of the coefficients and allows for improved variable selection as well as regression. A paper I found helpful in understanding lasso regression was [this one](http://statweb.stanford.edu/~tibs/lasso/lasso.pdf) by Tibshirani.
+
+The **glmnet** library implements logistic regression with the lasso penalty in R. Tibshirani is also one of the authors of the package. The vignette can be found [here](http://web.stanford.edu/~hastie/glmnet/glmnet_alpha.html). 
+
+We now currently have 5 columns that are categorical. I don't believe glmnet transforms factors to dummies, so I will do this manually to be safe. However, each factor has several levels, but we can try to see if some can be dropped/manipulated. 
+
+It looks like `is_inc_v` can be binary (verified or not) and `sub_grade` can be dropped without losing much information, since `grade` is still a valid column. For `purpose`, I will group the reasons into mandatory (credit card payments, debt conslidation, medical expenses, starting a small business), personal expenses (home improvement, major purposes, vacation, wedding) and unsure (all else). 
+
+```{r manip, cache=TRUE}
+train$is_inc_v_new = sapply(train$is_inc_v, function(x) as.integer(x!="Not Verified")) # 0 = Not Verified, 1 = Verified
+train = select(train, -is_inc_v, -sub_grade)
+purposes_lookup = data.frame(purpose=levels(train$purpose), new_purpose=c("Unsure", "Mandatory", "Mandatory", "Personal", "Unsure", "Personal", "Mandatory", "Unsure", "Unsure", "Unsure", "Mandatory", "Personal", "Personal"))
+train %>% 
+  left_join(purposes_lookup, by="purpose") %>% 
+  select(-purpose) -> train 
+response_loc = match("decision", names(train))
+full = as.formula(paste("~", paste(names(train)[-response_loc], collapse="+")))
+```
+
+To find the lambda parameter, glmnet has a function to perform cross-validation fit using misclassification error as criteria (other options were: deviance, AUC, MSE/MAE). Since the coefficients are in log odds, we can translate them to odds so they are easier to understand. 
+
+```{r model, cache=TRUE, message=FALSE}
+library(glmnet)
+x = model.matrix(full, train)[,-1] # predictor
+y = as.factor(train$decision) # response
+set.seed(2015-08-28)
+cvfit = cv.glmnet(x, y, family="binomial", type.measure="class") # 10-fold
+plot(cvfit)
+res = as.matrix(coef(cvfit, s="lambda.min"))
+comb = data.frame(var=rownames(res), log_odds=res[,1], odds=exp(res[,1]))
+comb = filter(comb, odds!=1)
+arrange(comb, desc(odds))
+```
+
+It seems that the variables individually have very small contribution to whether or not a loan is repaid. But, we see that having the lowest loan grade and a 60-month term each are characteristics that point to higher likelihood that the creditor will not receive repayment. 
+
+While it would be great to test out this model with the validation set, I don't have the labelled version. However, I can get an estimate of the accuracy with cross-validation. 
+
+```{r accuracy, cache=TRUE}
+amt = round(nrow(x) * 0.9) # train only on 90% of data
+indic = sample(1:nrow(x), amt) # "shuffle" rows 
+xtrain = x[indic,]
+xtest = x[-indic,]
+ytrain = y[indic]
+ytest = y[-indic]
+cvfit2 = cv.glmnet(xtrain, ytrain, family="binomial", type.measure="class")
+predictions = predict(cvfit2, newx=xtest, type="class", s=cvfit2$lambda.min)
+table(predictions)
+sum(predictions==ytest) / length(ytest) 
+```
+
+Using 10% of the training set as validation, we have a near perfect accuracy rate of `r paste(round(sum(predictions==ytest) / length(ytest)*100, 2), "%")`. This is extremely high, so I'm a little bit skeptical of the results; possibly, my model went wrong somewhere, the model overfit on the training set, or the least likely option which is that logistic regression is a great fit for the dataset. Hopefully, I will have a better idea of the cause once I experiment with a few other methods. 
