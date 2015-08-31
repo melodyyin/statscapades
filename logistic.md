@@ -1,13 +1,13 @@
 ---
 title: "Logistic Regression with the Lasso"
 author: "Melody"
-date: "August 21, 2015"
+date: "August 28, 2015"
 output: html_document
 ---
 
 About a year ago, I naively entered a data hackathon hosted by a loan company. I had no experience with machine learning algorithms and I was only somewhat comfortable programming in R. We were given 6 hours to build the best model we can to decide whether or not to grant a loan to an individual based on information in a labelled training set. In short, it was a disaster; with only about 30 minutes left in the hackathon, I was still in the data cleanup stage! 
 
-Since then, I've completed [several ML/AI graduate courses](http://melodyyin.github.io/courses/) where I completed assignments using popular algorithms, and I've also been using R regularly both within courses and on my own time. So, I thought this dataset would be well-suited for learning new algorithms and reviewing old ones! In the following post, I will be implementing logistic regression.
+Since then, I've completed [several ML/AI graduate courses](http://melodyyin.github.io/courses/) where I have done assignments using popular algorithms, and I've also been using R regularly both within courses and on my own time. So, I thought this dataset would be well-suited for learning new algorithms and reviewing old ones! In the following post, I will be implementing logistic regression.
 
 ~
 
@@ -109,7 +109,7 @@ summary(col_nas)
 ##       0       0    2528    4729    7433   25150
 ```
 
-Ok, quite a lot of NAs in this dataset. If we were to get rid of all of the rows, then only 2207 would remain. However, we can keep all of our observations if we remove the columns with missing values so that only 26 columns remain. We could also perform imputation using k-nearest neighbors for the variables that are only about 10% missing, but risk adding bias to the training set otherwise.  
+Ok, quite a lot of NAs in this dataset. If we were to get rid of all of the rows, then only 2207 would remain. However, we can keep all of our observations if we remove the columns with missing values so that only 26 columns remain. We could also perform imputation using further regression or k-nearest neighbors for the variables that are only about 10% missing, but risk adding bias to the training set otherwise.  
 
 
 ```r
@@ -210,7 +210,7 @@ arrange(comb, desc(odds))
 ## 38                     gradeG -6.337515e+00  0.001768692
 ```
 
-It seems that the variables individually have very small contribution to whether or not a loan is repaid. But, we see that having the lowest loan grade and a 60-month term each are characteristics that point to higher likelihood that the creditor will not receive repayment. 
+It seems that the variables individually have very small contribution to whether or not a loan is repaid, since the majority of the variables have odds values hovering around 1. But, we see that having the lowest loan grade and a 60-month term each are characteristics that point to higher likelihood that the creditor will not receive repayment. Similarly, there are a few variables with odds of ~2, which means that the probability of successful repayment is 2x the probability that the loan is predicted to be charged off. 
 
 While it would be great to test out this model with the validation set, I don't have the labelled version. However, I can get an estimate of the accuracy with cross-validation. 
 
